@@ -5,6 +5,7 @@ from typing import Any
 from urllib import request as urlrequest
 from uuid import uuid4
 
+from django.db import transaction
 from django.utils import timezone
 
 from sitepulse.signing import now_timestamp, sign_batch
@@ -46,7 +47,39 @@ def enqueue_or_send(events: list[dict[str, Any]]) -> str | None:
         send_batch(batch)
     else:
         OutboxBatch.objects.create(batch_id=batch["batch_id"], payload=batch)
+        dispatch_drain()
     return batch["batch_id"]
+
+
+def dispatch_drain() -> None:
+    """Hand the row we just wrote to a worker now, rather than waiting for a poll.
+
+    This keeps what the outbox is for — the row is committed before anything is
+    sent, so a broker that is down, a worker that dies mid-send or a central
+    server that is unreachable all lose nothing — while removing the lag that
+    made the outbox behave like a queue instead of a transport.
+
+    ``on_commit`` matters: dispatched any earlier, a worker can pick the task up
+    and query for a row the sending transaction has not committed yet, find
+    nothing, and report success over an empty table.
+
+    Every failure here is swallowed on purpose. The row is already durable and a
+    periodic drain will collect it, and an analytics transport must never be able
+    to raise inside the request that produced the event — least of all a payment
+    webhook.
+    """
+    try:
+        from .tasks import drain_sitepulse_outbox
+    except ImportError:  # celery is not installed in this host
+        return
+
+    def send_now() -> None:
+        try:
+            drain_sitepulse_outbox.delay()
+        except Exception:  # noqa: BLE001 — broker unreachable; the poll will catch it
+            pass
+
+    transaction.on_commit(send_now)
 
 
 def send_batch(batch: dict[str, Any]) -> None:
