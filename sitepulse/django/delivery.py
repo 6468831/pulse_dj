@@ -13,6 +13,19 @@ from sitepulse.signing import now_timestamp, sign_batch
 from .models import OutboxBatch
 from .settings import sitepulse_setting
 
+# Retries run 2s, 4s, 8s … doubling until the cap, then hourly, so fourteen
+# attempts span a little over three hours. The previous eight gave up after four
+# minutes, which is shorter than a redeploy: an outage nobody would call an
+# outage was enough to lose a payment permanently, because dead rows are never
+# retried.
+MAX_ATTEMPTS = 14
+MAX_BACKOFF_SECONDS = 3600
+
+# Delivered rows are kept a week — long enough to answer "did that event
+# actually go?" — then dropped. Nothing else prunes this table, and it holds the
+# full JSON of every batch ever sent.
+SENT_RETENTION_DAYS = 7
+
 
 def build_batch(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {
@@ -102,10 +115,10 @@ def drain_outbox(limit: int = 100) -> int:
         except Exception as exc:  # pragma: no cover - exercised with network in integration
             row.attempts += 1
             row.last_error = str(exc)[:2000]
-            if row.attempts >= 8:
+            if row.attempts >= MAX_ATTEMPTS:
                 row.status = OutboxBatch.STATUS_DEAD
             else:
-                delay = min(3600, 2 ** row.attempts)
+                delay = min(MAX_BACKOFF_SECONDS, 2 ** row.attempts)
                 row.next_attempt_at = timezone.now() + timezone.timedelta(seconds=delay)
             row.save(update_fields=["attempts", "last_error", "status", "next_attempt_at"])
         else:
@@ -114,3 +127,18 @@ def drain_outbox(limit: int = 100) -> int:
             row.save(update_fields=["status", "sent_at"])
             sent += 1
     return sent
+
+
+def prune_outbox(older_than_days: int = SENT_RETENTION_DAYS) -> int:
+    """Drop delivered rows past the retention window.
+
+    Only ``sent`` rows. A ``dead`` row is the record of an event that never
+    arrived — the one thing in this table worth keeping until someone has looked
+    at it, and rare enough that keeping it costs nothing.
+    """
+    cutoff = timezone.now() - timezone.timedelta(days=older_than_days)
+    deleted, _ = OutboxBatch.objects.filter(
+        status=OutboxBatch.STATUS_SENT,
+        sent_at__lt=cutoff,
+    ).delete()
+    return deleted

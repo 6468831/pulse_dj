@@ -5,7 +5,7 @@ import time
 from django.core.management.base import BaseCommand
 from django.db import OperationalError, ProgrammingError
 
-from sitepulse.django.delivery import drain_outbox
+from sitepulse.django.delivery import SENT_RETENTION_DAYS, drain_outbox, prune_outbox
 
 
 class Command(BaseCommand):
@@ -15,8 +15,20 @@ class Command(BaseCommand):
         parser.add_argument("--limit", type=int, default=100)
         parser.add_argument("--loop", action="store_true")
         parser.add_argument("--sleep", type=float, default=5.0)
+        parser.add_argument(
+            "--prune",
+            action="store_true",
+            help=(
+                "Also delete delivered rows older than the retention window. For "
+                "hosts without Celery: run this from cron, not with --loop."
+            ),
+        )
+        parser.add_argument("--prune-days", type=int, default=SENT_RETENTION_DAYS)
 
     def handle(self, *args, **options) -> None:
+        if options["prune"]:
+            deleted = prune_outbox(older_than_days=options["prune_days"])
+            self.stdout.write(f"Pruned {deleted} delivered batch(es).")
         while True:
             try:
                 sent = drain_outbox(limit=options["limit"])
