@@ -9,7 +9,12 @@ description = "Django client integration for SitePulse first-party analytics."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "Django>=4.2,<5.3",
+  # Upper bound is the next major, not the current one. The package touches only
+  # AppConfig, settings, cache, BaseCommand, the db exceptions, models,
+  # HttpRequest/JsonResponse, path, timezone, csrf_exempt and require_POST —
+  # none of which moved in 5.x or 6.x. Capping at <5.3 meant installing this
+  # into a Django 6 host silently downgraded that host's framework.
+  "Django>=4.2,<7",
   "requests>=2.32",
 ]
 
