@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sitepulse-django"
+version = "0.1.0"
+description = "Django client integration for SitePulse first-party analytics."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "Django>=4.2,<5.3",
+  "requests>=2.32",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-django>=4.8",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[tool.setuptools.packages.find]
+include = ["sitepulse*"]
+
+[tool.setuptools.package-data]
+"sitepulse.django" = ["static/sitepulse/runtime-core.js"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+python_files = ["test_*.py"]
