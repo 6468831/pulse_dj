@@ -73,6 +73,10 @@ def events(request: HttpRequest) -> JsonResponse:
         event["local_user_id"] = local_user_id
         event["scoped_user_hash"] = scoped_hmac(secret, local_user_id, "uh_") if local_user_id else None
         accepted.append(redact(event))
+    # Consumed and enriched here, so the middleware must not drain them again on
+    # the way out — same event_id twice is a wasted batch the central server
+    # rejects on its unique (project, event_id).
+    del backend_events[:]
 
     batch_id = enqueue_or_send(accepted)
     return JsonResponse({"accepted": len(accepted), "rejected": rejected, "batch_id": batch_id})

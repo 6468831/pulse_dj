@@ -36,6 +36,10 @@ def sign_payload(batch: dict[str, Any]) -> tuple[bytes, dict[str, str]]:
 def enqueue_or_send(events: list[dict[str, Any]]) -> str | None:
     if not events:
         return None
+    if not sitepulse_setting("PROJECT_ID"):
+        # Unconfigured host: queueing here would fill the outbox with batches that
+        # fail as unknown_project on every drain and die after eight attempts.
+        return None
     batch = build_batch(events)
     mode = sitepulse_setting("DELIVERY_MODE")
     if mode == "synchronous":
